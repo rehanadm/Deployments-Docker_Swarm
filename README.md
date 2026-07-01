@@ -416,31 +416,6 @@ Recommended:
 
 ---
 
-# Security Recommendations
-
-* Enable UFW or firewall rules
-* Use Docker Secrets
-* Use TLS certificates
-* Restrict NFS access
-* Enable HTTPS on HAProxy
-* Configure Grafana authentication
-* Regularly patch Ubuntu servers
-
----
-
-# Future Enhancements
-
-* Grafana with PostgreSQL backend
-* Prometheus + Thanos
-* Alertmanager clustering
-* HTTPS with Let's Encrypt
-* Ansible automation
-* Centralized logging (ELK/OpenSearch)
-* Ceph Storage for storage HA
-* Disaster Recovery Site
-
----
-
 # Project Outcome
 
 This deployment provides:
