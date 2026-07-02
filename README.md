@@ -24,13 +24,13 @@ The solution provides:
 
 | Hostname           | IP Address    | Role                        |
 | ------------------ | ------------- | --------------------------- |
-| node1              | 192.18.29.136 | Docker Swarm Manager        |
-| node2              | 192.18.29.137 | Docker Swarm Manager        |
-| node3              | 192.18.29.138 | Docker Swarm Manager        |
-| storage-nfs-node1  | 192.18.29.139 | NFS Storage                 |
-| loadbalancer-node1 | 192.18.29.140 | HAProxy + Keepalived MASTER |
-| loadbalancer-node2 | 192.18.29.141 | HAProxy + Keepalived BACKUP |
-| Virtual IP         | 192.18.29.150 | Monitoring Endpoint         |
+| node1              | 192.168.29.136 | Docker Swarm Manager        |
+| node2              | 192.168.29.137 | Docker Swarm Manager        |
+| node3              | 192.168.29.138 | Docker Swarm Manager        |
+| storage-nfs-node1  | 192.168.29.139 | NFS Storage                 |
+| loadbalancer-node1 | 192.168.29.140 | HAProxy + Keepalived MASTER |
+| loadbalancer-node2 | 192.168.29.141 | HAProxy + Keepalived BACKUP |
+| Virtual IP         | 192.168.29.150 | Monitoring Endpoint         |
 
 ---
 
@@ -38,12 +38,12 @@ The solution provides:
 
 ```text
                               VIP
-                        192.18.29.150
+                        192.168.29.150
                                |
                 +--------------+--------------+
                 |                             |
       loadbalancer-node1            loadbalancer-node2
-          192.18.29.140               192.18.29.141
+          192.168.29.140               192.168.29.141
              HAProxy                     HAProxy
        Keepalived MASTER           Keepalived BACKUP
                 |                             |
@@ -54,7 +54,7 @@ The solution provides:
          +---------------------+---------------------+
          |                     |                     |
       node1                 node2                 node3
-   192.18.29.136       192.18.29.137       192.18.29.138
+   192.168.29.136       192.168.29.137       192.168.29.138
       Manager             Manager             Manager
       Grafana             Grafana             Grafana
     Prometheus          Prometheus          Prometheus
@@ -65,7 +65,7 @@ The solution provides:
                     Shared NFS Storage
                             |
                  storage-nfs-node1
-                    192.18.29.139
+                    192.168.29.139
 ```
 
 ---
@@ -95,7 +95,7 @@ Keepalived provides:
 VIP Address:
 
 ```text
-192.18.29.150
+192.168.29.150
 ```
 
 ---
@@ -311,7 +311,7 @@ Running successfully.
 ## NFS
 
 ```bash
-showmount -e 192.18.29.139
+showmount -e 192.168.29.139
 ```
 
 ## VIP
@@ -323,7 +323,7 @@ ip addr
 Expected:
 
 ```text
-192.18.29.150
+192.168.29.150
 ```
 
 Available on active load balancer.
@@ -335,19 +335,19 @@ Available on active load balancer.
 ## Grafana
 
 ```text
-http://192.18.29.150/grafana
+http://192.168.29.150/grafana
 ```
 
 ## Prometheus
 
 ```text
-http://192.18.29.150/prometheus
+http://192.168.29.150/prometheus
 ```
 
 ## Alertmanager
 
 ```text
-http://192.18.29.150/alertmanager
+http://192.168.29.150/alertmanager
 ```
 
 ---
