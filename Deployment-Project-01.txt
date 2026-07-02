@@ -1,0 +1,424 @@
+========================================================================================================================================================================
+							Production HA Monitoring Platform on Docker Swarm
+========================================================================================================================================================================
+
+
+server OS- ubuntu 22.04
+node1- 192.18.29.136 - Docker,promethous, grafana 
+node2- 192.18.29.137 Docker,promethous, grafana 
+node3- 192.18.29.138 Docker,promethous, grafana 
+storage-nfs-node1- 192.18.29.139 - NFS service 
+loadbalancer-node1- 192.18.29.140 - HAPROXY 
+loadbalancer-node2- 192.18.29.141 - HAPROXY
+
+With 3 Docker nodes + 1 NFS node + 2 Load Balancer nodes, you can build a proper production-grade Docker Swarm monitoring platform with high availability at the cluster, service, and load-balancer layers.
+
+Production Architecture
+
+                        VIP: 192.168.29.150
+                                |
+                    +-----------+-----------+
+                    |                       |
+      loadbalancer-node1           loadbalancer-node2
+        192.168.29.140               192.168.29.141
+         HAProxy                     HAProxy
+      Keepalived MASTER         Keepalived BACKUP
+                    |                       |
+                    +-----------+-----------+
+                                |
+                     Docker Swarm Ingress
+                                |
+        +-----------------------+-----------------------+
+        |                       |                       |
+        |                       |                       |
+     node1                   node2                  node3
+ 192.168.29.136          192.168.29.137         192.168.29.138
+ Swarm Manager          Swarm Manager         Swarm Manager
+ Grafana                Grafana              Grafana
+ Prometheus             Prometheus           Prometheus
+ Alertmanager           Alertmanager         Alertmanager
+ Node Exporter          Node Exporter        Node Exporter
+ cAdvisor               cAdvisor             cAdvisor
+        \                   |                   /
+         \                  |                  /
+          +-----------------+-----------------+
+                            |
+                  storage-nfs-node1
+                    192.168.29.139
+                     NFS Storage
+
+=======================================================
+HA Goals
+=========
+Server HA
+Docker Swarm Managers
+---------
+All 3 nodes become managers:
+node1 = Leader
+node2 = Reachable
+node3 = Reachable
+---------
+Swarm quorum:
+3 Managers
+Minimum quorum = 2
+---------
+One node can fail without affecting cluster management.
+========================================================
+Load Balancer HA
+=================
+Keepalived provides:
+VIP = 192.168.29.150
+--------------------
+Failover:
+
+lb1 down
+     ↓
+VIP moves automatically
+     ↓
+lb2 becomes active
+=======================================================
+Service HA
+Grafana
+Replicas = 3
+
+One replica per node.
+---------------------
+Prometheus
+Replicas = 3
+
+Each scrapes the same targets.
+---------------------
+Alertmanager
+Replicas = 3
+
+Clustered mode.
+---------------------
+Node Exporter
+Global Mode
+
+Runs on all Docker nodes.
+---------------------
+cAdvisor
+Global Mode
+
+Runs on all Docker nodes.
+=======================================================
+Phase 1 - OS Preparation
+Run on all 6 servers.
+---------------------
+sudo apt update
+sudo apt upgrade -y
+sudo apt install -y \
+curl \
+wget \
+vim \
+git \
+jq \
+net-tools \
+chrony \
+nfs-common
+
+Static IP configuration:
+
+backup config file:
+cd /etc/netplan
+cp 50-cloud-init.yaml 50-cloud-init.yaml.bkp
+
+
+If server is currently getting its IP via DHCP & If Cloud-Init Keeps Overwriting the Network:
+
+sudo mkdir -p /etc/cloud/cloud.cfg.d
+echo "network: {config: disabled}" | sudo tee /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
+
+sudo rm -f /etc/netplan/50-cloud-init.yaml
+sudo netplan generate
+sudo netplan apply
+
+sudo vi /etc/netplan/01-static-ip.yaml
+
+network:
+  version: 2
+  ethernets:
+    ens33:
+      dhcp4: false
+      addresses:
+        - 192.168.29.136/24
+      routes:
+        - to: default
+          via: 192.168.29.1
+      nameservers:
+        addresses:
+          - 8.8.8.8
+          - 1.1.1.1
+
+sudo chmod 600 /etc/netplan/01-static-ip.yaml
+
+sudo netplan generate
+sudo netplan try
+sudo netplan apply
+
+---------------------
+Enable time sync:
+sudo systemctl enable chrony
+sudo systemctl start chrony
+---------------------
+Phase 2 - Hostnames
+node1
+sudo hostnamectl set-hostname node1
+node2
+sudo hostnamectl set-hostname node2
+node3
+sudo hostnamectl set-hostname node3
+nfs
+sudo hostnamectl set-hostname storage-nfs-node1
+lb1
+sudo hostnamectl set-hostname loadbalancer-node1
+lb2
+sudo hostnamectl set-hostname loadbalancer-node2
+---------------------
+Phase 3 - Hosts File
+
+Add on all servers:
+
+192.168.29.136 node1
+192.168.29.137 node2
+192.168.29.138 node3
+192.168.29.139 storage-nfs-node1
+192.168.29.140 loadbalancer-node1
+192.168.29.141 loadbalancer-node2
+---------------------
+Phase 4 - NFS Setup
+storage-nfs-node1
+
+Install:
+
+sudo apt install -y nfs-kernel-server
+
+Create directories:
+
+sudo mkdir -p /exports/grafana
+sudo mkdir -p /exports/prometheus
+sudo mkdir -p /exports/alertmanager
+
+Permissions:
+
+sudo chmod -R 777 /exports
+
+Edit:
+
+sudo vi /etc/exports
+/exports/grafana     192.168.29.0/24(rw,sync,no_root_squash,no_subtree_check)
+/exports/prometheus  192.168.29.0/24(rw,sync,no_root_squash,no_subtree_check)
+/exports/alertmanager 192.168.29.0/24(rw,sync,no_root_squash,no_subtree_check)
+
+Apply:
+
+sudo exportfs -ra
+sudo systemctl restart nfs-kernel-server
+sudo systemctl status nfs-kernel-server
+---------------------
+Phase 5 - Mount NFS
+
+Run on node1/node2/node3.
+
+sudo mkdir -p /mnt/grafana
+sudo mkdir -p /mnt/prometheus
+sudo mkdir -p /mnt/alertmanager
+
+Add:
+
+sudo vi /etc/fstab
+192.168.29.139:/exports/grafana /mnt/grafana nfs defaults,_netdev 0 0
+192.168.29.139:/exports/prometheus /mnt/prometheus nfs defaults,_netdev 0 0
+192.168.29.139:/exports/alertmanager /mnt/alertmanager nfs defaults,_netdev 0 0
+
+Mount:
+
+sudo mount -a
+---------------------
+Phase 6 - Docker Installation
+
+Run on node1/node2/node3.
+
+curl -fsSL https://get.docker.com | sudo sh
+
+Enable:
+
+sudo systemctl enable docker
+sudo systemctl start docker
+
+Verify:
+
+docker version
+---------------------
+Phase 7 - Create Swarm Cluster
+node1
+docker swarm init \
+--advertise-addr 192.168.29.136
+
+Get manager token:
+
+docker swarm join-token manager
+node2
+docker swarm join \
+--token <manager-token> \
+192.168.29.136:2377
+node3
+docker swarm join \
+--token <manager-token> \
+192.168.29.136:2377
+
+Verify:
+
+docker node ls
+
+Expected:
+
+node1 Leader
+node2 Reachable
+node3 Reachable
+---------------------
+Phase 8 - Overlay Network
+docker network create \
+--driver overlay \
+monitoring-net
+---------------------
+Phase 9 - Node Exporter
+docker service create \
+--name node-exporter \
+--mode global \
+--network monitoring-net \
+-p 9100:9100 \
+prom/node-exporter
+---------------------
+Phase 10 - cAdvisor
+docker service create \
+--name cadvisor \
+--mode global \
+--network monitoring-net \
+-p 8080:8080 \
+--mount type=bind,src=/,dst=/rootfs,readonly \
+--mount type=bind,src=/sys,dst=/sys,readonly \
+--mount type=bind,src=/var/run,dst=/var/run \
+--mount type=bind,src=/var/lib/docker,dst=/var/lib/docker,readonly \
+gcr.io/cadvisor/cadvisor
+---------------------
+Phase 11 - Prometheus
+
+Create Prometheus configuration and store it as a Docker config.
+
+Deploy:
+
+docker service create \
+--name prometheus \
+--replicas 3 \
+--network monitoring-net \
+--mount type=bind,src=/mnt/prometheus,dst=/prometheus \
+-p 9090:9090 \
+prom/prometheus
+---------------------
+Phase 12 - Alertmanager
+docker service create \
+--name alertmanager \
+--replicas 3 \
+--network monitoring-net \
+-p 9093:9093 \
+prom/alertmanager
+---------------------
+Phase 13 - Grafana
+
+Create password secret:
+
+echo 'StrongPassword@123' | docker secret create grafana_admin_password -
+
+Deploy:
+
+docker service create \
+--name grafana \
+--replicas 3 \
+--network monitoring-net \
+-p 3000:3000 \
+--mount type=bind,src=/mnt/grafana,dst=/var/lib/grafana \
+grafana/grafana
+---------------------
+Phase 14 - HAProxy
+
+Install on both load balancers:
+
+sudo apt install -y haproxy keepalived
+
+/etc/haproxy/haproxy.cfg
+
+frontend monitoring
+    bind *:80
+
+    acl grafana path_beg /grafana
+    acl prometheus path_beg /prometheus
+    acl alertmanager path_beg /alertmanager
+
+    use_backend grafana_backend if grafana
+    use_backend prometheus_backend if prometheus
+    use_backend alertmanager_backend if alertmanager
+
+backend grafana_backend
+    balance roundrobin
+    server g1 192.168.29.136:3000 check
+    server g2 192.168.29.137:3000 check
+    server g3 192.168.29.138:3000 check
+
+backend prometheus_backend
+    balance roundrobin
+    server p1 192.168.29.136:9090 check
+    server p2 192.168.29.137:9090 check
+    server p3 192.168.29.138:9090 check
+
+backend alertmanager_backend
+    balance roundrobin
+    server a1 192.168.29.136:9093 check
+    server a2 192.168.29.137:9093 check
+    server a3 192.168.29.138:9093 check
+
+Restart:
+
+sudo systemctl restart haproxy
+sudo systemctl enable haproxy
+---------------------
+Phase 15 - Keepalived
+sudo apt install -y keepalived
+sudo vi /etc/keepalived/keepalived.conf
+
+VIP:
+
+192.168.29.150
+MASTER (lb1)
+vrrp_instance VI_1 {
+    state MASTER
+    interface ens33
+    virtual_router_id 51
+    priority 150
+    advert_int 1
+
+    virtual_ipaddress {
+        192.168.29.150
+    }
+}
+BACKUP (lb2)
+vrrp_instance VI_1 {
+    state BACKUP
+    interface ens33
+    virtual_router_id 51
+    priority 100
+    advert_int 1
+
+    virtual_ipaddress {
+        192.168.29.150
+    }
+}
+
+Enable:
+
+sudo systemctl enable keepalived
+sudo systemctl restart keepalived
+
+
+---------------------
